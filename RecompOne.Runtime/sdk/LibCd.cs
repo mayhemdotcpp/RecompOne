@@ -58,6 +58,7 @@ public static class LibCd
     private static uint _cbRead;
 
     private static bool _readActive;
+    private static int _seekGen;
     private static bool _xaActive;
     private static byte _filterFile;
     private static byte _filterChannel;
@@ -352,7 +353,7 @@ public static class LibCd
         else
         {
             c.Restore(snap);
-            if (_readyOnlyRead) PumpReady(1);
+            if (_readyOnlyRead) PumpReady(ReadySectorsThisTick());
             return;
         }
 
@@ -534,6 +535,18 @@ public static class LibCd
 
     public static int SectorsPerFrame { get; set; } = -1;
 
+    private static double _readyCredit;
+
+    // ready-callback reads at the drive's real rate
+    // 75 sectors/s single speed or 150 double speed, per ~60hz tick
+    private static int ReadySectorsThisTick()
+    {
+        _readyCredit += ((_mode & 0x80) != 0 ? 150.0 : 75.0) / 60.0;
+        var n = (int)_readyCredit;
+        _readyCredit -= n;
+        return Math.Max(n, 1);
+    }
+
     private static int DeliveryLimit()
     {
         return SectorsPerFrame > 0 ? SectorsPerFrame : MaxSectorsPerTick;
@@ -571,7 +584,9 @@ public static class LibCd
                 _cdDataPending = false;
                 c.A0 = DataReady;
                 c.A1 = PublishStatus(m);
+                var seekGen = _seekGen;
                 Dispatcher.Call(c, m, _cbReady);
+                if (_seekGen != seekGen) break;
                 AdvancePos(1);
                 Dispatcher.LoadByLba(CurrentLba);
                 if (!_cdDataPending) break;
@@ -1086,6 +1101,7 @@ public static class LibCd
                         for (var i = 0; i < 4; i++) _pos[i] = m.ReadU8(param + (uint)i);
                     }
 
+                _seekGen++;
                 _readActive = false;
                 _readyOnlyRead = false;
                 lock (_dataIrqQueue)

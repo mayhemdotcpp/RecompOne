@@ -104,7 +104,7 @@ public static class Interrupts
     private static void PollSlow(CpuContext cpu, IMemory mem)
     {
         _countdown = PollInterval;
-        TickVBlank();
+        var vblank = TickVBlank();
         Runtime.Timers?.Poll(RaiseTimer);
         if (_inHandler || _servicing || !_irqEnabled) return;
 
@@ -115,6 +115,12 @@ public static class Interrupts
             DrainPending(cpu, mem);
             BiosB.PumpCardEvents(cpu, mem);
             Runtime.Cd?.AdvanceStreaming();
+            if (vblank && Runtime.TakeIdleVBlank())
+            {
+                Sdk.LibCd.Tick();
+                Runtime.RefreshPadsIdle(mem);
+                Runtime.PublishIfStalled();
+            }
         }
         finally
         {
@@ -143,9 +149,11 @@ public static class Interrupts
         PollNow(cpu, mem);
     }
 
-    private static void TickVBlank()
+    private static bool TickVBlank()
     {
-        if (Host.FrameClock.Catch() > 0) Raise(0);
+        if (Host.FrameClock.Catch() <= 0) return false;
+        Raise(0);
+        return true;
     }
 
     public static void ResyncVBlank()

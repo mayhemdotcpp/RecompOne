@@ -311,10 +311,14 @@ internal static unsafe class InputManager
     {
         ushort s = 0xFFFF;
 
-        void B(string keyName, ushort bit)
+        void B(string keyNames, ushort bit)
         {
-            if (Enum.TryParse<Key>(keyName, out var k) && kb.IsKeyPressed(k))
-                s &= (ushort)~bit;
+            foreach (var keyName in KeyBindings.Split(keyNames))
+                if (Enum.TryParse<Key>(keyName, out var k) && kb.IsKeyPressed(k))
+                {
+                    s &= (ushort)~bit;
+                    return;
+                }
         }
 
         B(cfg.Cross, Controller.Cross);

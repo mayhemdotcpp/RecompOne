@@ -23,6 +23,7 @@ public static class Gte
     private static readonly int[] BK = new int[3];
     private static readonly int[] FC = new int[3];
     private static int OFX, OFY;
+
     private static ushort H;
     private static short DQA;
     private static int DQB;

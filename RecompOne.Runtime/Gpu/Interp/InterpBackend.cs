@@ -247,6 +247,17 @@ public sealed class InterpBackend : IGpuBackend
     
     public double PaceMs { get; private set; }
     
+    public bool HasPending
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _active && !_recording.IsEmpty;
+            }
+        }
+    }
+
     public void Publish()
     {
         if (!_active) return;

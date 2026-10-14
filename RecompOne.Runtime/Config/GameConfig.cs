@@ -2,6 +2,18 @@ namespace RecompOne.Runtime.Config;
 
 public class KeyBindings
 {
+    public static Func<KeyBindings> Default { get; set; } = () => new KeyBindings();
+
+    public static string[] Split(string keys)
+    {
+        return keys.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    }
+
+    public static string Join(IEnumerable<string> keys)
+    {
+        return string.Join(", ", keys);
+    }
+
     public string Cross { get; set; } = "Z";
     public string Circle { get; set; } = "X";
     public string Square { get; set; } = "A";
@@ -92,7 +104,7 @@ public class GameConfig
     public float SpuVolume { get; set; } = 1.0f;
     public float XaVolume { get; set; } = 1.0f;
     public bool Muted { get; set; } = false;
-    public KeyBindings Keys { get; set; } = new();
+    public KeyBindings Keys { get; set; } = KeyBindings.Default();
     public KeyBindings Keys2 { get; set; } = KeyBindings.Empty();
     public GamepadBindings Pad { get; set; } = new();
     public GamepadBindings Pad2 { get; set; } = GamepadBindings.Empty();

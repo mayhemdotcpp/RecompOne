@@ -71,7 +71,7 @@ internal sealed class InputSettingsSection : ISettingsSection
         {
             if (!_gamepadMode)
             {
-                if (_padIndex == 0) ConfigManager.Game.Keys = new KeyBindings();
+                if (_padIndex == 0) ConfigManager.Game.Keys = KeyBindings.Default();
                 else ConfigManager.Game.Keys2 = KeyBindings.Empty();
             }
             else
@@ -316,17 +316,35 @@ internal sealed class InputSettingsSection : ISettingsSection
             }
             else
             {
-                var key = getKey(keys);
+                var bound = KeyBindings.Split(getKey(keys));
                 var text = awaiting
-                    ? Localization.T("settings.input.press_key")
-                    : $"{(key.Length == 0 ? Localization.T("settings.input.unbound") : key)}##k{i}";
-                if (ImGui.Button(text, new Vector2(-1, 0))) _remapRow = i;
+                    ? Localization.T(_remapAdd ? "settings.input.press_key_add" : "settings.input.press_key")
+                    : bound.Length == 0
+                        ? Localization.T("settings.input.unbound")
+                        : string.Join(" | ", bound);
+
+                var plusW = ImGui.GetFrameHeight();
+                var spacing = ImGui.GetStyle().ItemSpacing.X;
+                if (ImGui.Button($"{text}##k{i}", new Vector2(-plusW - spacing, 0)))
+                {
+                    _remapRow = i;
+                    _remapAdd = false;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button($"+##kadd{i}", new Vector2(plusW, 0)))
+                {
+                    _remapRow = i;
+                    _remapAdd = true;
+                }
+
                 if (awaiting)
                 {
                     var p = GetPressedKey();
                     if (p != null)
                     {
-                        setKey(keys, p);
+                        if (!_remapAdd) setKey(keys, p);
+                        else if (!bound.Contains(p)) setKey(keys, KeyBindings.Join([.. bound, p]));
                         _remapRow = -1;
                         ConfigManager.SaveGame();
                     }

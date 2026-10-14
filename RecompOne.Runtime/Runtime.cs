@@ -325,6 +325,34 @@ public static class Runtime
         _nextPresentMs += intervalMs;
     }
     
+    private static bool _presentedSinceVBlank;
+
+    internal static bool TakeIdleVBlank()
+    {
+        var idle = !_presentedSinceVBlank;
+        _presentedSinceVBlank = false;
+        return idle;
+    }
+
+    internal static void RefreshPadsIdle(IMemory mem)
+    {
+        Bios.BiosB.RefreshPad(mem);
+        Sdk.LibPad.Refresh(mem);
+    }
+
+    private static double _lastPublishMs;
+    private const double StallPublishMs = 100.0;
+
+    internal static void PublishIfStalled()
+    {
+        var backend = Interp.Interp.Backend;
+        if (backend == null) return;
+        var now = Interrupts.ClockMs;
+        if (now - _lastPublishMs < StallPublishMs || !backend.HasPending) return;
+        _lastPublishMs = now;
+        backend.Publish();
+    }
+
     public static void PresentFrame()
     {
         if (_hardResetPending)
@@ -333,10 +361,12 @@ public static class Runtime
             throw new HardResetSignal();
         }
 
+        _lastPublishMs = Interrupts.ClockMs;
         Interp.Interp.Backend?.Publish();
         
         Audio.Attach(Spu);
         FrameClock.MarkFrame();
+        _presentedSinceVBlank = true;
         Sdk.LibCd.Tick();
         if (Cpu != null && Mem != null) Sdk.LibMcrd.Tick(Cpu, Mem);
         if (Mem != null)

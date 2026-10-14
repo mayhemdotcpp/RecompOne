@@ -1074,6 +1074,14 @@
       "zh-CN": "[请按下键盘按键...]",
       "fr-FR": "[Appuyez sur une touche...]"
     },
+    "settings.input.press_key_add": {
+      "en": "[press key to add...]",
+      "pt-BR": "[pressione uma tecla para adicionar...]",
+      "es-419": "[presiona una tecla para agregar...]",
+      "ja-JP": "[追加するキーを押してください...]",
+      "zh-CN": "[按下键盘按键来追加...]",
+      "fr-FR": "[Appuyez sur une touche pour ajouter...]"
+    },
     "settings.input.press_button": {
       "en": "[press button...]",
       "pt-BR": "[pressione um botão...]",
