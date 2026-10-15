@@ -8,7 +8,7 @@ using RecompOne.Runtime.Cdrom;
 
 if (args.Length == 0)
 {
-    Console.Error.WriteLine("usage: recompone <config.json>");
+    Console.Error.WriteLine("usage: recompone <config.json> [-disc <path>]");
     Console.Error.WriteLine(
         "       recompone --generate-function-file -elf <path> -map <path> -out <output.json> [-rebase <hex>]");
     Console.Error.WriteLine("       recompone --probe-disc <disc> [-json <out.json>] [-all]");
@@ -51,7 +51,19 @@ foreach (var overlay in config.Overlays)
     overlay.FuncMap = ResolvePath(overlay.FuncMap);
 }
 
-var cuePath = Path.GetFullPath(Path.Combine(configDir, config.Cue));
+string? discArg = null;
+for (var i = 1; i < args.Length; i++)
+{
+    if (string.Equals(args[i], "-disc", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+        discArg = args[++i];
+    else
+    {
+        Console.Error.WriteLine($"unknown argument: {args[i]}");
+        return 1;
+    }
+}
+
+var cuePath = discArg != null ? Path.GetFullPath(discArg) : Path.GetFullPath(Path.Combine(configDir, config.Cue));
 
 if (!File.Exists(cuePath))
 {
