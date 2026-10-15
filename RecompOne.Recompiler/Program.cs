@@ -63,6 +63,12 @@ for (var i = 1; i < args.Length; i++)
     }
 }
 
+if (discArg == null && string.IsNullOrWhiteSpace(config.Cue))
+{
+    Console.Error.WriteLine("no disc given: pass -disc <path> or set \"cue\" in the config");
+    return 1;
+}
+
 var cuePath = discArg != null ? Path.GetFullPath(discArg) : Path.GetFullPath(Path.Combine(configDir, config.Cue));
 
 if (!File.Exists(cuePath))
