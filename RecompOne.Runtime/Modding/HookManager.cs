@@ -1,5 +1,4 @@
 using System.Reflection;
-using MonoMod.RuntimeDetour;
 using RecompOne.Runtime.Context;
 using RecompOne.Runtime.Memory;
 
@@ -19,7 +18,8 @@ public static class HookManager
         public Entry<Action<CpuContext, IMemory>>[] Posts = [];
         public Action<Action<CpuContext, IMemory>, CpuContext, IMemory>? Replace;
         public ModInfo? ReplaceOwner;
-        public Hook? Hook;
+        public Action<CpuContext, IMemory>?[]? Slots;
+        public int Slot;
 
         public bool Empty => Pres.Length == 0 && Posts.Length == 0 && Replace == null;
     }
@@ -162,8 +162,7 @@ public static class HookManager
 
                 if (hooks.Empty)
                 {
-                    hooks.Hook?.Dispose();
-                    hooks.Hook = null;
+                    if (hooks.Slots != null) Volatile.Write(ref hooks.Slots[hooks.Slot], null);
                     _hooks.Remove(target);
                 }
             }
@@ -176,13 +175,41 @@ public static class HookManager
         {
             foreach (var (target, hooks) in _hooks)
             {
-                if (hooks.Hook != null) continue;
+                if (hooks.Slots != null) continue;
+                if (!TryGetSlot(target, out var slots, out var slot, out var orig))
+                {
+                    Console.Error.WriteLine($"[Mods] {target.Name} has no hook slot");
+                    continue;
+                }
+
                 var state = hooks;
-                hooks.Hook = new Hook(target,
-                    (Action<Action<CpuContext, IMemory>, CpuContext, IMemory>)
-                    ((orig, c, m) => Invoke(state, orig, c, m)));
+                hooks.Slots = slots;
+                hooks.Slot = slot;
+                Volatile.Write(ref slots[slot], (c, m) => Invoke(state, orig, c, m));
             }
         }
+    }
+
+    private static bool TryGetSlot(MethodInfo target, out Action<CpuContext, IMemory>?[] slots, out int slot,
+        out Action<CpuContext, IMemory> orig)
+    {
+        slots = [];
+        slot = -1;
+        orig = null!;
+        var attr = target.GetCustomAttribute<HookSlotAttribute>();
+        var type = target.DeclaringType;
+        if (attr == null || type == null) return false;
+
+        var field = type.GetField("__HookSlots", BindingFlags.Public | BindingFlags.Static);
+        var body = type.GetMethod(target.Name + "_Orig", BindingFlags.Public | BindingFlags.Static, SigBasic);
+        if (field?.GetValue(null) is not Action<CpuContext, IMemory>?[] array || body == null ||
+            attr.Index < 0 || attr.Index >= array.Length)
+            return false;
+
+        slots = array;
+        slot = attr.Index;
+        orig = body.CreateDelegate<Action<CpuContext, IMemory>>();
+        return true;
     }
 
     private static void Invoke(FunctionHooks hooks, Action<CpuContext, IMemory> orig, CpuContext c, IMemory m)

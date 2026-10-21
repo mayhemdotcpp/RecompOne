@@ -1,5 +1,16 @@
 namespace RecompOne.Runtime.Modding;
 
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class HookSlotAttribute : Attribute
+{
+    public int Index { get; }
+
+    public HookSlotAttribute(int index)
+    {
+        Index = index;
+    }
+}
+
 public abstract class FunctionHookAttribute : Attribute
 {
     public string Overlay { get; }

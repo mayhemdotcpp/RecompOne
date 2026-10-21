@@ -6,6 +6,8 @@ namespace RecompOne.Recompiler.CodeGen;
 
 public static class FunctionEmitter
 {
+    public const string HookSlotsField = "__HookSlots";
+
     public static string Emit(MipsFunction func, FunctionContext ctx)
     {
         var sb = new StringBuilder();
@@ -32,6 +34,18 @@ public static class FunctionEmitter
             return sb.ToString();
         }
 
+        //mod hooks: the function checks its slot and runs whatever a mod put there
+        sb.AppendLine(noInline);
+        sb.AppendLine($"    [RecompOne.Runtime.Modding.HookSlot({ctx.HookSlot})]");
+        sb.AppendLine($"    public static void {name}(CpuContext c, IMemory m)");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        var hook = {HookSlotsField}[{ctx.HookSlot}];");
+        sb.AppendLine("        if (hook != null) hook(c, m);");
+        sb.AppendLine($"        else {name}_Orig(c, m);");
+        sb.AppendLine("    }");
+        var impl = $"{name}_Impl";
+        name += "_Orig";
+
         var hooked = func.PreHookTargets.Count > 0 || func.PostHookTargets.Count > 0;
 
         if (func.IsPatch)
@@ -55,9 +69,9 @@ public static class FunctionEmitter
             sb.AppendLine(noInline);
             sb.AppendLine($"    public static void {name}(CpuContext c, IMemory m)");
             sb.AppendLine("    {");
-            EmitHooks(sb, func, $"        {name}_Impl(c, m);");
+            EmitHooks(sb, func, $"        {impl}(c, m);");
             sb.AppendLine("    }");
-            name += "_Impl";
+            name = impl;
         }
 
         sb.AppendLine(noInline);

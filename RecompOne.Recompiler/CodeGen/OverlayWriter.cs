@@ -345,6 +345,7 @@ public static class OverlayWriter
             sb.AppendLine($"public static partial class {part.Class}");
             sb.AppendLine("{");
 
+            var hookSlots = 0;
             foreach (var func in part.Functions)
             {
                 var labels = LabelManager.Collect(func);
@@ -364,10 +365,14 @@ public static class OverlayWriter
                     RaReturnJrs = FunctionDetector.ComputeRaReturnJrs(func),
                     LinkReturns = LabelManager.CollectLinkReturns(func),
                     AllInstructions = instrs,
-                    Relocations = relocations
+                    Relocations = relocations,
+                    HookSlot = func.IsStub ? -1 : hookSlots++
                 };
                 sb.Append(FunctionEmitter.Emit(func, ctx));
             }
+
+            sb.AppendLine($"    public static readonly Action<CpuContext, IMemory>[] {FunctionEmitter.HookSlotsField} =");
+            sb.AppendLine($"        new Action<CpuContext, IMemory>[{hookSlots}];");
 
             sb.AppendLine("}");
             sb.AppendLine();

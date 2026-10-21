@@ -468,6 +468,7 @@ public sealed class FunctionContext
     public HashSet<uint> LinkReturns = [];
     public MipsInstruction[] AllInstructions = [];
     public Dictionary<uint, uint> Relocations = [];
+    public int HookSlot;
 
     private const int CommentColumn = 64;
 

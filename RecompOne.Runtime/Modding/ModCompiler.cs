@@ -38,34 +38,19 @@ public static class ModCompiler
     {
         if (_references != null) return _references;
 
-        var refs = new List<MetadataReference>();
-        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+        var framework = Assembly.Load("netstandard");
+        foreach (var name in framework.GetReferencedAssemblies())
         {
-            if (a.IsDynamic) continue;
-
-            if (!string.IsNullOrEmpty(a.Location))
-            {
-                if (paths.Add(a.Location)) refs.Add(MetadataReference.CreateFromFile(a.Location));
-                continue;
-            }
-
-            //use the budnled dll instead of trying to find ones that odnt exist, should fix mod on single file publish
-            if (a.TryGetRawMetadata(out var blob, out var length))
-                refs.Add(
-                    AssemblyMetadata.Create(ModuleMetadata.CreateFromMetadata((IntPtr)blob, length)).GetReference());
+            try { Assembly.Load(name); }
+            catch (Exception ex) { Console.Error.WriteLine($"[Mods] could not load {name.Name}: {ex.Message}"); }
         }
 
-        // framework assemblies that are not loaded yet, so mods can use the whole BCL
-        if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string tpa)
-            foreach (var path in tpa.Split(Path.PathSeparator))
-            {
-                var name = Path.GetFileName(path);
-                if ((name.StartsWith("System.", StringComparison.OrdinalIgnoreCase) ||
-                     name.Equals("netstandard.dll", StringComparison.OrdinalIgnoreCase)) &&
-                    File.Exists(path) && paths.Add(path))
-                    refs.Add(MetadataReference.CreateFromFile(path));
-            }
+        var refs = new List<MetadataReference>();
+        var seen = new HashSet<string>();
+        foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            if (!a.IsDynamic && a.FullName is { } fullName && seen.Add(fullName) &&
+                a.TryGetRawMetadata(out var blob, out var length))
+                refs.Add(AssemblyMetadata.Create(ModuleMetadata.CreateFromMetadata((IntPtr)blob, length)).GetReference());
 
         _references = refs;
         return _references;
