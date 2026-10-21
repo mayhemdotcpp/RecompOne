@@ -298,13 +298,13 @@ internal static unsafe class InputManager
         var kb = _keyboard;
         if (kb == null)
         {
-            Controller.State = 0xFFFF;
-            Controller.State2 = 0xFFFF;
+            Controller.State = (ushort)~Controller.Forced;
+            Controller.State2 = (ushort)~Controller.Forced2;
             return;
         }
 
-        Controller.State = KeyState(kb, ConfigManager.Game.Keys);
-        Controller.State2 = KeyState(kb, ConfigManager.Game.Keys2);
+        Controller.State = (ushort)(KeyState(kb, ConfigManager.Game.Keys) & ~Controller.Forced);
+        Controller.State2 = (ushort)(KeyState(kb, ConfigManager.Game.Keys2) & ~Controller.Forced2);
     }
 
     private static ushort KeyState(IKeyboard kb, KeyBindings cfg)

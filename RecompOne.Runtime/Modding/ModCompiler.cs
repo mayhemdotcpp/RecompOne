@@ -39,13 +39,14 @@ public static class ModCompiler
         if (_references != null) return _references;
 
         var refs = new List<MetadataReference>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
         {
             if (a.IsDynamic) continue;
 
             if (!string.IsNullOrEmpty(a.Location))
             {
-                refs.Add(MetadataReference.CreateFromFile(a.Location));
+                if (paths.Add(a.Location)) refs.Add(MetadataReference.CreateFromFile(a.Location));
                 continue;
             }
 
@@ -54,6 +55,17 @@ public static class ModCompiler
                 refs.Add(
                     AssemblyMetadata.Create(ModuleMetadata.CreateFromMetadata((IntPtr)blob, length)).GetReference());
         }
+
+        // framework assemblies that are not loaded yet, so mods can use the whole BCL
+        if (AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") is string tpa)
+            foreach (var path in tpa.Split(Path.PathSeparator))
+            {
+                var name = Path.GetFileName(path);
+                if ((name.StartsWith("System.", StringComparison.OrdinalIgnoreCase) ||
+                     name.Equals("netstandard.dll", StringComparison.OrdinalIgnoreCase)) &&
+                    File.Exists(path) && paths.Add(path))
+                    refs.Add(MetadataReference.CreateFromFile(path));
+            }
 
         _references = refs;
         return _references;

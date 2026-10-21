@@ -22,6 +22,11 @@ public static class Controller
     public static bool Analog;
     public static bool Analog2;
 
+    // buttons held down regardless of keyboard and gamepad (scripted input)
+    // set bits are pressed
+    public static volatile ushort Forced;
+    public static volatile ushort Forced2;
+
     public static ushort State = 0xFFFF;
     public static byte RightX = 0x80;
     public static byte RightY = 0x80;
