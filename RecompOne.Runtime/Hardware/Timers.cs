@@ -17,10 +17,12 @@ public sealed class Timers
     private readonly double[] _resetT = new double[3];
     private readonly ushort[] _mode = new ushort[3];
     private readonly ushort[] _target = new ushort[3];
-    private readonly long[] _fired = new long[3];
+    private readonly long[] _counted = new long[3];
+    private readonly long[] _owed = new long[3];
     private double _nextDue;
 
     private const double IdleCheck = 0.25;
+    private const double SlipSeconds = 1.0;
 
     public static bool InRange(uint phys)
     {
@@ -50,18 +52,21 @@ public sealed class Timers
         {
             case 0x0:
                 _resetT[t] = _clock.Elapsed.TotalSeconds;
-                _fired[t] = 0;
+                _counted[t] = 0;
+                _owed[t] = 0;
                 _nextDue = 0.0;
                 break;
             case 0x4:
                 _mode[t] = (ushort)value;
                 _resetT[t] = _clock.Elapsed.TotalSeconds;
-                _fired[t] = 0;
+                _counted[t] = 0;
+                _owed[t] = 0;
                 _nextDue = 0.0;
                 break;
             case 0x8:
                 _target[t] = (ushort)value;
-                _fired[t] = 0;
+                _counted[t] = 0;
+                _owed[t] = 0;
                 _nextDue = 0.0;
                 break;
         }
@@ -82,11 +87,15 @@ public sealed class Timers
         return (_mode[t] & 0x08u) != 0 && target > 0 ? target + 1L : 0x10000L;
     }
 
-    public void Poll(Action<int> raise)
+    public void Poll(Func<int, bool> raise)
     {
         var now = _clock.Elapsed.TotalSeconds;
-        if (now < _nextDue) return;
+        if (now >= _nextDue) Count(now);
+        RaiseOwed(raise);
+    }
 
+    private void Count(double now)
+    {
         var due = double.MaxValue;
 
         for (var t = 0; t < 3; t++)
@@ -100,16 +109,32 @@ public sealed class Timers
             var repeat = (mode & 0x40u) != 0;
             var laps = (long)((now - _resetT[t]) / period);
 
-            if (laps > _fired[t])
+            if (laps > _counted[t])
             {
-                if (repeat || _fired[t] == 0) raise(4 + t);
-                _fired[t] = laps;
+                if (repeat) _owed[t] = Math.Min(_owed[t] + laps - _counted[t], Math.Max(1L, (long)(SlipSeconds / period)));
+                else if (_counted[t] == 0) _owed[t] = 1;
+                _counted[t] = laps;
             }
 
-            if (repeat) due = Math.Min(due, _resetT[t] + (_fired[t] + 1) * period);
+            if (repeat) due = Math.Min(due, _resetT[t] + (_counted[t] + 1) * period);
         }
 
         _nextDue = due < double.MaxValue ? due : now + IdleCheck;
+    }
+
+    public long Owed => _owed[0] + _owed[1] + _owed[2];
+
+    public bool RaiseOwed(Func<int, bool> raise)
+    {
+        var raised = false;
+        for (var t = 0; t < 3; t++)
+        {
+            if (_owed[t] == 0 || !raise(4 + t)) continue;
+            _owed[t]--;
+            raised = true;
+        }
+
+        return raised;
     }
 
     private double Rate(int t)

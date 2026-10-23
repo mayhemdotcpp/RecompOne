@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace RecompOne.Runtime;
@@ -6,6 +7,19 @@ public sealed class Spu
 {
     public const int RamSize = 512 * 1024;
     public readonly byte[] Ram = new byte[RamSize];
+
+    public const int SampleRate = 44100;
+
+    private const int MaxAdvance = SampleRate;
+    private const int RenderChunk = 512;
+    private const int OutputFrames = SampleRate / 2;
+
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+    private long _rendered;
+
+    private readonly short[] _render = new short[RenderChunk * 2];
+    private readonly short[] _out = new short[OutputFrames * 2];
+    private int _outRead, _outCount;
 
     private const uint Base = 0x1F801C00u;
 
@@ -286,6 +300,9 @@ public sealed class Spu
     private ushort _eon, _eonHi;
     private uint _endx;
     private ushort _spucnt;
+    private ushort _irqAddr;
+    private bool _irqFlag;
+    private volatile bool _irqRaised;
     private ushort _transferAddr;
     private ushort _transferCtrl = 4;
     private ushort _cdVolL, _cdVolR;
@@ -321,6 +338,7 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             return ReadReg(phys);
         }
     }
@@ -373,7 +391,8 @@ public sealed class Spu
             0x1A6 => _transferAddr,
             0x1AA => _spucnt,
             0x1AC => _transferCtrl,
-            0x1AE => (ushort)(_spucnt & 0x3F),
+            0x1A4 => _irqAddr,
+            0x1AE => (ushort)((_spucnt & 0x3F) | (_irqFlag ? 0x40 : 0)),
             0x1B0 => _cdVolL,
             0x1B2 => _cdVolR,
             0x1B4 => _extVolL,
@@ -386,6 +405,7 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             WriteReg(phys, val);
         }
     }
@@ -447,7 +467,11 @@ public sealed class Spu
             case 0x19A: _eonHi = val; break;
             case 0x1A2: _reverbStartAddr = val; break;
             case 0x1A6: _transferAddr = val; break;
-            case 0x1AA: _spucnt = val; break;
+            case 0x1A4: _irqAddr = val; break;
+            case 0x1AA:
+                _spucnt = val;
+                if ((val & 0x40) == 0) _irqFlag = false;
+                break;
             case 0x1AC: _transferCtrl = val; break;
             case 0x1B0: _cdVolL = val; break;
             case 0x1B2: _cdVolR = val; break;
@@ -516,6 +540,7 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             var nonMask = (uint)(_non | (_nonHi << 16));
             var pmonMask = (uint)(_pmon | (_pmonHi << 16));
             var eonMask = (uint)(_eon | (_eonHi << 16));
@@ -563,8 +588,10 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             for (var i = 0; i < data.Length; i++)
                 Ram[(spuByteAddr + (uint)i) & (RamSize - 1)] = data[i];
+            CheckIrq(spuByteAddr, data.Length);
         }
     }
 
@@ -572,6 +599,7 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             if (_mainCurL == 0 && _mainCurR == 0)
                 _mainVolL = _mainVolR = 0x3FFF;
             _cdVolL = _cdVolR = 0x3FFF;
@@ -584,6 +612,7 @@ public sealed class Spu
     {
         lock (_sync)
         {
+            Advance();
             _cdMixLL = ltol;
             _cdMixLR = ltor;
             _cdMixRL = rtol;
@@ -593,9 +622,84 @@ public sealed class Spu
 
     private short[] _xaL = [], _xaR = [];
 
-    private const int MixChunk = 16;
+    public bool TakeOutput(Span<short> dst)
+    {
+        var frames = dst.Length / 2;
+        lock (_sync)
+        {
+            Advance();
+            if (_outCount < frames) return false;
 
-    public void Mix(short[] dst, int frames)
+            var first = Math.Min(frames, OutputFrames - _outRead);
+            _out.AsSpan(_outRead * 2, first * 2).CopyTo(dst);
+            _out.AsSpan(0, (frames - first) * 2).CopyTo(dst[(first * 2)..]);
+            _outRead = (_outRead + frames) % OutputFrames;
+            _outCount -= frames;
+            return true;
+        }
+    }
+
+    public int OutputBacklog
+    {
+        get
+        {
+            lock (_sync)
+            {
+                Advance();
+                return _outCount;
+            }
+        }
+    }
+
+    public bool TakeIrq()
+    {
+        if (!_irqRaised) return false;
+        lock (_sync)
+        {
+            var raised = _irqRaised;
+            _irqRaised = false;
+            return raised;
+        }
+    }
+
+    private void CheckIrq(uint addr, int length)
+    {
+        if ((_spucnt & 0x40) == 0 || _irqFlag) return;
+        if (((((uint)_irqAddr << 3) - addr) & (RamSize - 1)) >= (uint)length) return;
+        _irqFlag = true;
+        _irqRaised = true;
+    }
+
+    private void Advance()
+    {
+        var due = (long)(_clock.Elapsed.TotalSeconds * SampleRate);
+        var frames = Math.Min(due - _rendered, MaxAdvance);
+        _rendered = due;
+
+        while (frames > 0)
+        {
+            var n = (int)Math.Min(frames, RenderChunk);
+            Render(_render, n);
+            Output(_render.AsSpan(0, n * 2));
+            frames -= n;
+        }
+    }
+
+    private void Output(ReadOnlySpan<short> frames)
+    {
+        var count = frames.Length / 2;
+        var write = (_outRead + _outCount) % OutputFrames;
+        for (var i = 0; i < count; i++)
+        {
+            _out[write * 2] = frames[i * 2];
+            _out[write * 2 + 1] = frames[i * 2 + 1];
+            write = (write + 1) % OutputFrames;
+            if (_outCount < OutputFrames) _outCount++;
+            else _outRead = (_outRead + 1) % OutputFrames;
+        }
+    }
+
+    private void Render(short[] dst, int frames)
     {
         if (_xaL.Length < frames)
         {
@@ -605,45 +709,37 @@ public sealed class Spu
 
         var xaCount = XaAudio.NextBlock(_xaL, _xaR, frames);
 
-        for (var chunk = 0; chunk < frames; chunk += MixChunk)
+        for (var n = 0; n < frames; n++)
         {
-            var last = Math.Min(chunk + MixChunk, frames);
+            SweepTick(_mainVolL, ref _mainCurL, ref _mainCycL);
+            SweepTick(_mainVolR, ref _mainCurR, ref _mainCycR);
 
-            lock (_sync)
+            var (l, r) = Tick();
+            int mixL = (l * _voiceGain) >> 15, mixR = (r * _voiceGain) >> 15;
+            if (n < xaCount)
             {
-                for (var n = chunk; n < last; n++)
+                short xl = _xaL[n], xr = _xaR[n];
+                var aL = Math.Clamp((xl * _cdMixLL + xr * _cdMixRL) >> 7, -32768, 32767);
+                var aR = Math.Clamp((xl * _cdMixLR + xr * _cdMixRR) >> 7, -32768, 32767);
+                var cL = (((aL * (short)_cdVolL) >> 15) * _xaGain) >> 15;
+                var cR = (((aR * (short)_cdVolR) >> 15) * _xaGain) >> 15;
+                mixL += cL;
+                mixR += cR;
+                if ((_spucnt & 0x04) != 0)
                 {
-                    SweepTick(_mainVolL, ref _mainCurL, ref _mainCycL);
-                    SweepTick(_mainVolR, ref _mainCurR, ref _mainCycR);
-
-                    var (l, r) = Tick();
-                    int mixL = (l * _voiceGain) >> 15, mixR = (r * _voiceGain) >> 15;
-                    if (n < xaCount)
-                    {
-                        short xl = _xaL[n], xr = _xaR[n];
-                        var aL = Math.Clamp((xl * _cdMixLL + xr * _cdMixRL) >> 7, -32768, 32767);
-                        var aR = Math.Clamp((xl * _cdMixLR + xr * _cdMixRR) >> 7, -32768, 32767);
-                        var cL = (((aL * (short)_cdVolL) >> 15) * _xaGain) >> 15;
-                        var cR = (((aR * (short)_cdVolR) >> 15) * _xaGain) >> 15;
-                        mixL += cL;
-                        mixR += cR;
-                        if ((_spucnt & 0x04) != 0)
-                        {
-                            _revInL += cL;
-                            _revInR += cR;
-                        }
-                    }
-
-                    _revRight = !_revRight;
-                    if (_revRight) ReverbStep(_revInL, _revInR);
-                    mixL += RevMul(_revOutL, (short)_reverbVolL);
-                    mixR += RevMul(_revOutR, (short)_reverbVolR);
-                    mixL = (Math.Clamp(mixL, -32768, 32767) * _mainCurL) >> 15;
-                    mixR = (Math.Clamp(mixR, -32768, 32767) * _mainCurR) >> 15;
-                    dst[n * 2] = (short)mixL;
-                    dst[n * 2 + 1] = (short)mixR;
+                    _revInL += cL;
+                    _revInR += cR;
                 }
             }
+
+            _revRight = !_revRight;
+            if (_revRight) ReverbStep(_revInL, _revInR);
+            mixL += RevMul(_revOutL, (short)_reverbVolL);
+            mixR += RevMul(_revOutR, (short)_reverbVolR);
+            mixL = (Math.Clamp(mixL, -32768, 32767) * _mainCurL) >> 15;
+            mixR = (Math.Clamp(mixR, -32768, 32767) * _mainCurR) >> 15;
+            dst[n * 2] = (short)mixL;
+            dst[n * 2 + 1] = (short)mixR;
         }
     }
 
@@ -776,6 +872,7 @@ public sealed class Spu
         v.Buf[2] = v.Buf[30];
 
         var addr = v.CurAddr & (uint)(RamSize - 1);
+        CheckIrq(addr, 16);
         var hdr = Ram[addr];
         var flags = Ram[(addr + 1) & (RamSize - 1)];
 

@@ -106,6 +106,7 @@ public static class Interrupts
         _countdown = PollInterval;
         var vblank = TickVBlank();
         Runtime.Timers?.Poll(RaiseTimer);
+        if (Runtime.Spu?.TakeIrq() == true) Raise(9);
         if (_inHandler || _servicing || !_irqEnabled) return;
 
         var snap = cpu.Snapshot();
@@ -113,6 +114,8 @@ public static class Interrupts
         try
         {
             DrainPending(cpu, mem);
+            if (Runtime.Timers is { } timers)
+                for (var owed = timers.Owed; owed > 0 && timers.RaiseOwed(RaiseTimer); owed--) DrainPending(cpu, mem);
             BiosB.PumpCardEvents(cpu, mem);
             Runtime.Cd?.AdvanceStreaming();
             if (vblank && Runtime.TakeIdleVBlank())
@@ -161,11 +164,13 @@ public static class Interrupts
         Host.FrameClock.Resync();
     }
 
-    private static void RaiseTimer(int irq)
+    //a timer lap waits while its last irq is unacknowledged in I_STAT instead of merging into it
+    private static bool RaiseTimer(int irq)
     {
-        if ((uint)irq >= _pending.Length) return;
+        if ((uint)irq >= _pending.Length || (_istat & (1u << irq)) != 0) return false;
         _istat |= 1u << irq;
         _pending[irq] = true;
+        return true;
     }
 
     public static void Raise(int irq)
